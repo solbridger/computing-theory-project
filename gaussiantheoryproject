@@ -1,0 +1,262 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Sun Mar 29 19:50:25 2020
+
+@author: solbridger
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+import scipy.constants as pc
+import math
+import sys
+import matplotlib.cm as cm
+import time
+np.set_printoptions(threshold=sys.maxsize)
+import scipy.integrate as intg
+
+##set values
+dx=0.05 # x step , difference between x values
+x0=0
+sigma=0.7 #S.D of the gaussian
+k0=20 #momenta of the wave packet
+Norm=(((2*np.pi)**(1/2))*sigma)**(-1/2) #gaussian normalisation
+startx=-50 #beginning x value
+stopx=50 #end x value 
+
+def gaussian_wave():
+    '''Produces an array of points in a gaussian distribution with step size in x of dx'''
+    start=startx #beginning x value
+    stop=stopx #end x value  
+    xvalues=np.arange(start,stop,dx) #creates an array of x values spacing dx
+    #x0=(start+stop)/2 #centre of the distribution ie. the mean of x 
+    igaus=Norm*np.exp(((-(xvalues-x0)**2)/(4*sigma**2))+(1j*k0*(xvalues-x0)))  #wave packet including imaginary part
+    gaus=igaus.real #real part of the wave
+    xgaus=np.dstack((xvalues,gaus))
+    return xvalues,gaus,igaus
+def plot_gaus(xvalues,function):
+    '''plots gaussian'''
+    fig, ax = plt.subplots()
+    ax.plot(xvalues,function,c='m',label='Gaussian wave packet')
+    ax.set_xlabel('x')
+    ax.set_ylabel('$\psi$')
+    ax.legend()
+    plt.show()
+    return
+    
+plot_gaus(gaussian_wave()[0],gaussian_wave()[2].real)    
+
+##set values
+dt=0.001 #timestep
+t0=0 #starting time
+tmax=6  #code will output a wavefunction at tmax
+ts=np.array([t0]) 
+
+
+def finite_diff(F):
+    ''' inputs an array and returns a same dimension array of the approximated second dervative using finite difference 
+    with $\Delta x$ as dx, hardcodes the start and end values as 0 each time to avoid a reduction in the dimensions of the array, 
+    this will be a source of error in the final results'''
+    psi=F
+    #print('psi',psi[0],psi[-1])
+    psi_plus=np.delete(np.append(psi,0),0)
+    #print('plus',psi_plus[0],psi_plus[-1])
+    dummy=np.insert(psi,0,0)
+    psi_minus=np.delete(dummy,-1)
+    #print('minus',psi_minus[0],psi_minus[-1])
+    diff=(psi_plus + psi_minus - 2*psi)
+    #print(len(diff))
+    f_diff=diff/(2*dx**2)
+    #print('f_diff',f_diff)
+    
+    return f_diff
+
+
+#print(finite_diff(gaussian_wave()[2]))
+
+def potential():
+    '''input the potential function here'''
+
+    return 0
+
+def function(F,t):
+    '''returns equation (2), inputs an array F and single value t'''
+    psi=F
+    #print('minus thing',gaussian_wave()[2]-F)
+    #psi=np.delete(psi,-1)
+    V=potential()
+    diff=finite_diff(F)
+    #print('DIFF',diff)
+    F=1j*(diff-V*psi)
+    #print('F',F)
+    return F
+
+def rk4(F,t,dt):
+    k1=function(F,t)
+    k2=function(F+dt/2*k1,t+dt/2)
+    k3=function(F+dt/2*k2,t+dt/2)
+    k4=function(F+dt*k3,t+dt)
+    F=F+dt*(k1+2*k2+2*k3+k4)/6
+    t += dt
+    F=np.delete(F,-1)
+    F=np.delete(F,0)
+    F=np.insert(F,0,0)
+    F=np.append(F,0)
+    return F,t
+
+start=time.time() ##times how long it takes to run the function
+
+def stack_iterations(function,start_t,stop_t,dt):
+    '''stacks all itterations dt vertically untill the time reaches tmax, creating a 2D matrix of the function values at every time called FNS '''
+    t=start_t
+    ts=start_t
+    FN=function
+    FNS=function
+    for i in range(int(stop_t/dt)):  # take enough steps (or so)
+        FN,t=rk4(FN,t,dt)  #FN after the loop has iterated will be the values of the gaussian at time tmax 
+        ts=np.append(ts,t) #array of the times over which the wave is evolved
+        FNS=np.vstack((FNS,FN)) # array of all the values of the gaussian as it is evolved in time at steps dt
+    return FNS,ts
+
+FNS,ts=stack_iterations(gaussian_wave()[2],t0,tmax,dt) ##puts in the gaussian wave solution for t=0 and iterates it through thr RK4 method
+elapsed_time=(time.time()-start)
+print('run time is:',elapsed_time, 'step size in x:',dx,'step size in t:',dt,'s, maximum time:',tmax,'s')
+
+def multiple_plots(xs,FS,plotstep,types,wavepart):
+    '''Plots multiple plots on the same axis, including a legend of the earliest time and the latest time
+    where types=numerical/analytical'''
+    types=str(types)
+    plot_number=np.arange(0,FS.shape[0],plotstep) #array in steps of plot steps up to the length of FNS 
+    colours= cm.rainbow(np.linspace(0, 1, (FNS.shape)[0]))
+    for i in plot_number:
+        if i==0:
+            plt.plot(xs,np.absolute(FS[i,:])**2,c=colours[i],label='t = {0:.2f} s '.format(ts[0]))
+        elif i==np.max(plot_number):
+            plt.plot(xs,np.absolute(FS[i,:])**2,c=colours[i],label='t = {0:.2f} s'.format(ts[-1]))
+        else:
+            plt.plot(xs,np.absolute(FS[i,:])**2,c=colours[i])
+    plt.xlabel('x')
+    plt.ylabel('|%s $\psi^2$ %s|' %(wavepart,types))
+    plt.title('%s %s infinite potential well solution' %(wavepart,types))
+    plt.legend(loc='best')   
+    plt.show()
+    return
+multiple_plots(gaussian_wave()[0],FNS,50,'Numerical','Probability Density')
+
+def analytical_gaussian_solution(xvalues,t):
+    '''returns the analytical solution for a free gaussian wave packet'''
+    Norm= (sigma*((2*np.pi)**1/2))**1/2
+    element1=(sigma**2 + ((1j*t)/2) )**(-1/2)
+    element2= np.exp(-(sigma**2)*(k0**2))
+    element3= np.exp(- ((xvalues - x0 - (2j*(sigma**2)*k0))**2)/(4*(sigma**2 + (1j*t/2))))
+    F=Norm*element1*element2*element3
+    return F
+xvalues=gaussian_wave()[0]
+ana_solution=analytical_gaussian_solution(xvalues,t0)
+ana_array=analytical_gaussian_solution(xvalues,t0)
+t=t0
+for i in range(int(tmax/dt)):
+    t += dt
+    ana_solution=analytical_gaussian_solution(xvalues,t)
+    ana_array=np.vstack((ana_array,ana_solution))
+
+multiple_plots(xvalues,ana_array,50,'Analytical','Probability Density')     
+
+input_time=tmax ##the time at which the difference between the ana and numerical solutions is plotted
+element=int(input_time/dt) ##time is element *dt
+
+plt.plot(xvalues,np.absolute(ana_array[element,:])**2,c='red',label='analytical solution')
+plt.plot(xvalues,np.absolute(FNS[element,:])**2,c='blue',label='numerical solution')
+plt.legend(loc='best')
+plt.xlabel('x')
+plt.ylabel('$\psi^2$')
+plt.title('Analytical VS numerical probability density free gaussian wave at {0:.2f} s'.format(input_time))
+plt.show()
+
+def norm_plot(num_func):
+    norm_array = np.zeros((0,))
+    for i in range(len(FNS)):
+        if i>= 0:
+            norm_array = np.append(norm_array,intg.simps((np.absolute((num_func[i,:])))**2, x=None,dx=dx))
+    
+    x = ts
+    y = norm_array
+    plt.grid(True)
+    plt.xlabel('t /s')
+    plt.ylabel('N')
+    plt.xlim(0,tmax)
+    plt.ylim(0.99,1.01)
+    plt.title('Normalisation vs time')
+    plt.plot(x,y,c='r')
+    plt.show()
+    
+norm_plot(FNS)
+
+def energy_vals(num_func):
+    E_array = []
+    for i in range(len(FNS)):
+        if i>=0:
+            E_array = np.append(E_array,(intg.simps(np.conj(num_func[i,:])*((function(num_func[i,:],i*dt))*1j), x=None,dx=dx)))
+    
+    x = ts
+    y = E_array
+    plt.grid(True)
+    plt.xlabel('t /s')
+    plt.ylabel('E')
+    plt.ylim(0,2e+2)
+    plt.title('Energy vs time')
+    plt.plot(x,y,c='r')
+    plt.show()
+    #print(E_array)
+    
+energy_vals(FNS)
+
+def fidelity(num_func,analytic_func):
+    fidel_array = np.zeros((0,))
+    for i in range(len(FNS)):
+        if i>= 0:
+            fidel_array = np.append(fidel_array,np.absolute(intg.simps(np.conj(num_func[i,:])*analytic_func[i,:], x=None,dx=dx))**2)
+    
+    x = ts
+    y = fidel_array
+    plt.grid(True)
+    plt.xlabel('t /s')
+    plt.ylabel('F')
+    plt.xlim(0,tmax)
+    
+    plt.title('Fidelity vs time')
+    plt.plot(x,y,c='r')
+    plt.show()
+    
+fidelity(FNS,ana_array)
+
+#def TR_coeffs():
+    
+    
+    
+
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

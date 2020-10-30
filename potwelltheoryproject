@@ -1,0 +1,267 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Sat Apr  4 17:47:35 2020
+
+@author: solbridger
+"""
+
+
+import numpy as np
+import matplotlib.pyplot as plt
+import scipy.constants as pc
+import scipy.integrate as intg
+import math
+import sys
+import matplotlib.cm as cm
+import time
+np.set_printoptions(threshold=sys.maxsize)
+
+##set values
+dx=0.1 # x step , difference between x values
+startx=0 #beginning x value
+stopx=20 #end x value 
+xvalues=np.arange(startx,stopx,dx) #array of x co-ordinates , separation dx
+n=2 #number of nodes in the wavefunction
+
+def potential_well_solution():
+    '''returns an array of the function values using equation 1 given above'''
+    L=stopx-startx
+    F=(2/(L))**1/2*np.sin((n*np.pi*xvalues)/L)
+    return F
+
+solution=potential_well_solution()
+
+plt.plot(xvalues,solution) ##plots equation (1), the stationary solution for an infinite potential well 
+plt.xlabel('x')
+plt.ylabel('$\psi$')
+plt.title('Stationary infinite potential well solution',loc='center')
+plt.tight_layout()
+plt.show()
+
+##set values
+dt=0.01 #timestep
+t0=0 #starting time
+tmax=70  #code will output a wavefunction at tmax
+ts=np.array([t0]) 
+
+def finite_diff(F):
+    ''' inputs an array and returns a same dimension array of the approximated second dervative using finite difference 
+    with $\Delta x$ as dx, hardcodes the start and end values as 0 each time to avoid a reduction in the dimensions of the array, 
+    this will be a source of error in the final results, matric methods here greatly reduce run time !'''
+    psi=F
+    psi_plus=np.delete(np.append(psi,0),0)
+    dummy=np.insert(psi,0,0)
+    psi_minus=np.delete(dummy,-1)
+    diff=(psi_plus + psi_minus - 2*psi)
+    f_diff=diff/(2*dx**2)
+    return f_diff
+    
+def potential():
+    '''input the potential function here'''
+    return 0
+
+def function(F,t):
+    '''returns equation (2), inputs an array F and single value t'''
+    psi=F
+    #print('minus thing',gaussian_wave()[2]-F)
+    #psi=np.delete(psi,-1)
+    V=potential()
+    diff=finite_diff(F)
+    #print('DIFF',diff)
+    F=1j*(diff-V*psi)
+    #print('F',F)
+    return F
+
+def rk4(F,t,dt):
+    '''function that implements the RK4 method'''
+    k1=function(F,t)
+    k2=function(F+dt/2*k1,t+dt/2)
+    k3=function(F+dt/2*k2,t+dt/2)
+    k4=function(F+dt*k3,t+dt)
+    F=F+dt*(k1+2*k2+2*k3+k4)/6
+    t += dt
+    F=np.delete(F,-1)
+    F=np.delete(F,0)
+    F=np.insert(F,0,0)
+    F=np.append(F,0)
+    return F,t
+
+start=time.time() ##times how long it takes to run the function
+
+def stack_iterations(function,start_t,stop_t,dt):
+    '''stacks all itterations dt vertically untill the time reaches tmax, creating a 2D matrix of the function values at every time called FNS '''
+    t=start_t
+    ts=start_t
+    FN=function
+    FNS=function
+    for i in range(int(stop_t/dt)):  # take enough steps (or so)
+        FN,t=rk4(FN,t,dt)  #FN after the loop has iterated will be the values of the gaussian at time tmax 
+        ts=np.append(ts,t) #array of the times over which the wave is evolved
+        FNS=np.vstack((FNS,FN)) # array of all the values of the gaussian as it is evolved in time at steps dt
+    return FNS,ts
+
+FNS,ts=stack_iterations(potential_well_solution(),t0,tmax,dt) ##puts in the potential well solution for t=0 and iterates it through thr RK4 method
+elapsed_time=(time.time()-start)
+print('run time is:',elapsed_time, 'step size in x:',dx,'step size in t:',dt,'s, maximum time:',tmax,'s')
+
+
+def multiple_plots(xs,FS,plotstep,types,wavepart):
+    '''Plots multiple plots on the same axis, including a legend of the earliest time and the latest time
+    where types=numerical/analytical'''
+    types=str(types)
+    plot_number=np.arange(0,FS.shape[0],plotstep) #array in steps of plot steps up to the length of FNS 
+    colours= cm.rainbow(np.linspace(0, 1, (FNS.shape)[0]))
+    for i in plot_number:
+        if i==0:
+            plt.plot(xs,np.real(FS[i,:]),c=colours[i],label='t = {0:.2f} s '.format(ts[0]))
+        elif i==np.max(plot_number):
+            plt.plot(xs,np.real(FS[i,:]),c=colours[i],label='t = {0:.2f} s'.format(ts[-1]))
+        else:
+            plt.plot(xs,np.real(FS[i,:]),c=colours[i])
+    plt.xlabel('x')
+    plt.ylabel('$\psi$ %s %s' %(wavepart,types))
+    #plt.title('%s %s infinite potential well solution' %(wavepart,types))
+    plt.legend(loc='best')   
+    plt.show()
+    return
+multiple_plots(xvalues,FNS,50,'Numerical','Real')
+#fig = multiple_plots(xvalues,FNS,50,'Numerical','Real')
+#fig.save('Infpotwell.png')
+
+def potential_well_solution_time(values,t):
+    '''returns the analytical solution for a potential well evolving in time'''
+    L=stopx-startx
+    w=(((n*np.pi)/L)**2)/2
+    F=(2/(L))**1/2*np.sin((n*np.pi*values)/L)*np.exp(1j*w*t)
+    return F
+ana_solution=potential_well_solution_time(xvalues,0)
+ana_array=potential_well_solution_time(xvalues,0)
+t=t0
+
+for i in range(int(tmax/dt)):
+    t += dt
+    ana_solution=potential_well_solution_time(xvalues,t)
+    ana_array=np.vstack((ana_array,ana_solution))
+
+multiple_plots(xvalues,ana_array,50,'Analytical','Real')    
+
+input_time=tmax ##the time at which the difference between the ana and numerical solutions is plotted
+element=int(input_time/dt) ##time is element *dt
+"""
+"""
+plt.plot(xvalues,np.absolute(ana_array[element,:])**2,c='red',label='analytical solution')
+plt.plot(xvalues,np.absolute(FNS[element,:])**2,c='blue',label='numerical solution')
+plt.legend(loc='best')
+plt.xlabel('x')
+plt.ylabel('$\psi$')
+plt.title('Analytical VS numerical probability density infinite potential well solution at {0:.2f} s'.format(input_time))
+plt.show()
+
+def mean_difference(F1,F2,maxt):
+    '''finds the mean difference between arrays in F1 and F2 then plots them against time'''
+    ts=np.arange(0,maxt,dt)
+    mean_difference=np.zeros((0,0))
+    for i in range(len(ts)):
+        diff=np.absolute(np.absolute(F1[i,:])-np.absolute(F2[i,:]))
+        mean=np.mean(diff)
+        mean_difference=np.append(mean_difference,mean)
+    
+    plt.plot(ts,mean_difference)
+    plt.xlabel('time(s)')
+    plt.ylabel('mean difference')
+    plt.title('Mean difference between analytical and numerical solutions for the potential well')
+    plt.show()
+    return
+mean_difference(FNS,ana_array,tmax)
+
+def max_difference(F1,F2,maxt):
+    '''finds the maximum difference between arrays in F1 and F2 then plots them against time'''
+    ts=np.arange(0,maxt,dt)
+    max_difference=np.zeros((0,0))
+    for i in range(len(ts)):
+        diff=np.absolute(np.absolute(F1[i,:])-np.absolute(F2[i,:]))
+        maxi=np.max(diff)
+        max_difference=np.append(max_difference,maxi)
+    
+    plt.plot(ts,max_difference)
+    plt.xlabel('time(s)')
+    plt.ylabel('Maximum difference')
+    plt.title('Maximum difference between analytical and numerical solutions for the potential well')
+    plt.show()
+    return
+max_difference(FNS,ana_array,tmax)
+
+def time_taken(diff,start_div,stop_div,stop_time,function,input_shape): 
+    dt=start_div
+    run_times=np.zeros((0,0))
+    dts=np.zeros((0,0))
+    scale=np.arange(start_div,stop_div,diff)
+    #print(scale)
+    for i in range(len(scale)):
+        start=time.time()
+        function(input_shape(),0,stop_time,dt)
+        total_time=(time.time()-start)
+        run_times=np.append(run_times,total_time)
+        dts=np.append(dts,dt)
+        dt += diff
+        
+    plt.plot(dts,run_times,c='red')     
+    plt.ylabel('funtion run time')
+    plt.xlabel('function dt (s)')
+    plt.show
+    return
+
+time_taken(0.001,0.001,0.011,10,stack_iterations, potential_well_solution)
+
+
+
+
+
+def energy_vals():
+    E_array = []
+    for i in range(len(FNS)):
+        if i>=0:
+            E_array = np.append(E_array,(intg.simps(np.conj(FNS[i,:])*((function(FNS[i,:],i*dt))*1j), x=None,dx=dx)))
+    
+    x = ts
+    y = E_array
+    plt.grid(True)
+    plt.xlabel('t /s')
+    plt.ylabel('E')
+    plt.title('Energy vs time')
+    plt.plot(x,y,c='r')
+    plt.show()
+    #print(E_array)
+    
+energy_vals()
+
+def fidelity():
+    fidel_array = np.zeros((0,))
+    for i in range(len(FNS)):
+        if i>= 0:
+            fidel_array = np.append(fidel_array,np.absolute(intg.simps(np.conj(FNS[i,:])*ana_array[i,:], x=None,dx=dx))**2)
+    
+    x = ts
+    y = fidel_array
+    plt.grid(True)
+    plt.xlabel('t /s')
+    plt.ylabel('F')
+    plt.xlim(0,tmax)
+    #plt.ylim(,)
+    plt.title('Fidelity vs time')
+    plt.plot(x,y,c='r')
+    plt.show()
+    
+fidelity()
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,433 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Apr 13 21:04:20 2020
+
+@author: solbridger
+"""
+
+import numpy as np
+import matplotlib.pyplot as plt
+import scipy.constants as pc
+import math
+import sys
+import matplotlib.cm as cm
+import time
+from scipy.sparse import csc_matrix
+from scipy.sparse.linalg import splu
+from scipy.sparse import spdiags
+import scipy.integrate as intg
+np.set_printoptions(threshold=sys.maxsize)
+
+
+dx=0.01 # x step , difference between x values
+x0=0
+sigma=1.4 #S.D of the gaussian
+k0=20 #momenta of the wave packet
+Norm=(((2*np.pi)**(1/2))*sigma)**(-1/2) #gaussian normalisation
+startx=-100 #beginning x value
+stopx=200 #end x value 
+dt=0.001 #timestep
+t0=0 #starting time
+
+tmax=5  #code will output a wavefunction at tmax
+ts=np.array([t0]) 
+start=startx #beginning x value
+stop=stopx #end x value  
+xvalues=np.arange(start,stop,dx) #creates an array of x values spacing dx
+
+def gaussian_wave():
+    '''Produces an array of points in a gaussian distribution with step size in x of dx'''
+    
+    #x0=(start+stop)/2 #centre of the distribution ie. the mean of x 
+    igaus=Norm*np.exp(((-(xvalues-x0)**2)/(4*sigma**2))+(1j*k0*(xvalues-x0)))  #wave packet including imaginary part
+    gaus=igaus.real #real part of the wave
+    xgaus=np.dstack((xvalues,gaus))
+    return xvalues,gaus,igaus
+
+def plot_gaus(xvalues,function):
+    '''plots gaussian'''
+    fig, ax = plt.subplots()
+    ax.plot(xvalues,function,c='m',label='Gaussian wave packet')
+    ax.set_xlabel('x')
+    ax.set_ylabel('$\psi$')
+    ax.legend()
+    plt.show()
+    return
+    
+#plot_gaus(gaussian_wave()[0],np.absolute(gaussian_wave()[2])**2)    
+FN=gaussian_wave()[2] #array of gaussian wave packet values at time =0
+
+
+
+
+'''completes and plots Crank Nicholson Method''' 
+
+barrier_start=28
+barrier_end=30    #values in x space
+height=-200j #np.arange(0-(barrier_start-startx),1000,dx)   #height of potential
+b1=int(startx + (barrier_start + 1 - startx)/dx)   #lower bound
+b2=int(startx + (barrier_end + 1 - startx)/dx)    #upper bound
+
+def potential(length,b1,b2,h):
+    '''input the potential function here, returns an array of the potential values
+    b1=first boundary point of the potential
+    b2=end boundary point of potential
+    h=potential height'''
+    V=[0+0j]*length
+    for k,m in enumerate(V):
+        if b1 <= k <= b2:
+            V[k] = h
+    return V
+
+
+start=time.time() ##times how long it takes to run the function
+potential_array=potential(len(xvalues),b1,b2,height)
+def crank_nicholson(b1,b2,h):
+    '''Applies the crank nicholson method via an LU decomposition
+    input the potential function here, returns an array of the potential values
+    b1=first boundary point of the potential
+    b2=end boundary point of potential
+    h=potential height'''
+        
+    
+    ones=np.ones(len(FN),complex)
+    element_1=(1j*dt)/(4*dx**2)*ones 
+    element_2=ones+((1j*dt)/4)*((2/(dx**2))*ones + potential(len(FN),b1,b2,h))
+    element_3=ones-((1j*dt)/4)*((2/(dx**2))*ones + potential(len(FN),b1,b2,h))
+    
+    positions=np.array([-1,0,+1]) ##positions in diagonalised matrix
+    vectors1= np.array([-element_1,element_2,-element_1])
+    vectors2= np.array([element_1,element_3,element_1])
+    
+    YL=spdiags(vectors1,positions,len(FN),len(FN)) #YL is the operator on the LHS and YR is the operator on the RHS 
+    YL=csc_matrix(YL)
+    
+    
+    YR=spdiags(vectors2,positions,len(FN),len(FN))#produces a sparse diagonalised matrix
+    YR=csc_matrix(YR) #Converts this matrix to Compressed Sparse Column format
+    
+    FNS=np.zeros((int(tmax/dt),len(FN)),complex)
+    FNS[0,:]=FN
+    LU_decomp = splu(YL) #performs an LU decomposition of YL
+    ts=t0
+    t=t0
+    
+    for i in range(int(tmax/dt)-1):
+        RHS=YR.dot(FNS[i,:])
+        #print(LU_decomp.solve(RHS))
+        t+=dt
+        ts=np.append(ts,t)
+        FNS[i+1,:]=LU_decomp.solve(RHS)
+    return FNS,ts    
+  
+
+
+CNS=crank_nicholson(b1,b2,height)[0]
+ts=crank_nicholson(b1,b2,height)[1]
+elapsed_time=(time.time()-start)
+"""
+print('run time is:',elapsed_time, 'step size in x:',dx,'step size in t:',dt,'s, maximum time:',tmax,'s')
+
+def multiple_plots(xs,FS,plotstep,types,wavepart):
+    '''Plots multiple plots on the same axis, including a legend of the earliest time and the latest time
+    where types=numerical/analytical'''
+    types=str(types)
+    plot_number=np.arange(0,FS.shape[0],plotstep) #array in steps of plot steps up to the length of FNS 
+    colours= cm.rainbow(np.linspace(0, 1, (CNS.shape)[0]))
+    for i in plot_number:
+        if i==0:
+            plt.plot(xs,np.absolute(FS[i,:])**2,c=colours[i],label='t = {0:.2f} s '.format(ts[0]))
+        elif i==np.max(plot_number):
+            plt.plot(xs,np.absolute(FS[i,:])**2,c=colours[i],label='t = {0:.2f} s'.format(ts[-1]))
+        else:
+            plt.plot(xs,np.absolute(FS[i,:])**2,c=colours[i])
+    plt.xlabel('x')
+    plt.plot(xs,potential_array,c='k')
+    plt.ylabel('%s $\psi$ %s' %(wavepart,types))
+    #plt.ylim(0,0.25)
+    plt.legend(loc='best')   
+    plt.show()
+    return
+
+
+multiple_plots(xvalues,CNS,50,'Numerical','Probability Density')
+
+"""
+
+
+
+'''Analytical solution'''
+
+
+
+def analytical(t):
+    '''returns the analytical solution for a free gaussian wave packet'''
+    Norm= (sigma/((2*np.pi)**0.5))**0.5
+    element1=(sigma**2 + ((1j*t)/2) )**(-0.5)
+    element2= np.exp(-(sigma**2)*(k0**2))
+    element3=np.exp( -(( (xvalues - x0 - (2j*(sigma**2)*k0) ) **2)/ (4* (sigma**2 + (1j*t/2) ))) )
+    F=Norm*element1*element2*element3
+  
+    return F
+#ana_array=analytical_gaussian_solution(xvalues,t0)
+#t=t0
+#for i in range(int(tmax/dt)):
+#    t += dtA
+#    ana_solution=analytical_gaussian_solution(xvalues,t)
+#    ana_array=np.vstack((ana_array,ana_solution))
+#    
+"""
+'''Plots three different times for the numerical solution'''   
+ylim=1    
+    
+fig, axs = plt.subplots(2, 3,figsize=(15,12))
+axs[0,0].plot(xvalues, np.absolute(CNS[0,:])**2,c='k',label='Numerical solution')
+axs[0,0].plot(xvalues, potential_array ,c='r',label='Potential barrier')
+axs[0,0].set(xlim=(startx,stopx), ylim=(0,ylim))
+axs[0,0].set_title('t= 0 [a.u]',loc='left')
+axs[0,0].set_ylabel('Probability density $\mid\Psi\mid^{2}$ ')
+axs[0,0].legend(prop={'size': 10})
+
+
+axs[1,0].plot(xvalues, np.absolute(analytical(0))**2,c='b',label='Analytical solution ')
+axs[1,0].set(xlim=(startx,stopx), ylim=(0,ylim))
+axs[1,0].set_title('t= 0 [a.u]',loc='left')
+axs[1,0].set_ylabel('Probability density $\mid\Psi\mid^{2}$ ')
+axs[1,0].legend(prop={'size': 10})
+
+
+
+axs[0,1].plot(xvalues, np.absolute(CNS[int(1.2/dt),:])**2,c='k',label='Numerical solution')
+axs[0,1].set(xlim=(startx,stopx), ylim=(0,ylim))
+axs[0,1].plot(xvalues, potential_array ,c='r',label='Potential barrier')
+axs[0,1].set_xlabel('x [a.u]')
+axs[0,1].set_title('t=0.5 [a.u]',loc='left')
+axs[0,1].legend(prop={'size': 10})
+
+axs[1,1].plot(xvalues, np.absolute(analytical(1.2))**2,c='b',label='Analytical solution ')
+axs[1,1].set(xlim=(startx,stopx), ylim=(0,ylim))
+axs[1,1].set_xlabel('x [a.u]')
+axs[1,1].set_title('t=0.5 [a.u]',loc='left')
+axs[1,1].legend(prop={'size': 10})
+
+
+axs[0,2].plot(xvalues, np.absolute(CNS[int(4.9/dt),:])**2,c='k',label='Numerical solution')
+axs[0,2].set(xlim=(startx,stopx), ylim=(0,ylim))
+axs[0,2].plot(xvalues, potential_array ,c='r',label='Potential barrier')
+axs[0,2].set_title('t=4.9 [a.u]',loc='left')
+axs[0,2].legend(prop={'size': 10})
+
+axs[1,2].plot(xvalues, np.absolute(analytical(4.9))**2,c='b',label='Analytical solution ')
+axs[1,2].set(xlim=(startx,stopx), ylim=(0,ylim))
+axs[1,2].set_title('t=4.9 [a.u]',loc='left')
+axs[1,2].legend(prop={'size': 10})
+
+#
+#for ax in axs.flat:
+#    ax.label_outer()
+    
+plt.tight_layout()
+plt.savefig('gaussian_progression1_crank_N_dt=%.4f_dx=%.4f_k0=%.4f.png' %(dt,dx,k0))
+"""
+def finite_diff(F):
+    ''' inputs an array and returns a same dimension array of the approximated second dervative using finite difference 
+    with $\Delta x$ as dx, hardcodes the start and end values as 0 each time to avoid a reduction in the dimensions of the array, 
+    this will be a source of error in the final results'''
+    psi=F
+    #print('psi',psi[0],psi[-1])
+    psi_plus=np.delete(np.append(psi,0),0)
+    #print('plus',psi_plus[0],psi_plus[-1])
+    dummy=np.insert(psi,0,0)
+    psi_minus=np.delete(dummy,-1)
+    #print('minus',psi_minus[0],psi_minus[-1])
+    diff=(psi_plus + psi_minus - 2*psi)
+    #print(len(diff))
+    f_diff=diff/(2*dx**2)
+    #print('f_diff',f_diff)
+    
+    return f_diff
+
+def function(F,t):
+    '''returns equation (2), inputs an array F and single value t'''
+    V=np.zeros(len(xvalues))
+    diff=finite_diff(F)
+    #print('DIFF',diff)
+    F=1j*(diff-V*F)
+    #print('F',F)
+    return F
+
+"""
+def norm_plot():
+    norm_array = np.zeros((0,))
+    for i in range(0,len(CNS),10):
+        if i>= 0:
+            norm_array = np.append(norm_array,intg.simps((np.absolute((CNS[i,:]))**2), x=None,dx=dx))
+    
+    x = ts[::10]
+    y = 1-norm_array
+    plt.figure()
+    plt.grid(True)
+    plt.xlabel('t /s')
+    plt.ylabel('1-N')
+    plt.xlim(0,tmax)
+    plt.title('Normalisation vs time,dt=%.4f dx=%.4f' %(dt,dx))
+    plt.plot(x,y,c='r')
+    plt.savefig('Norm_CN _dt=%f_dx=%f.png'%(dt,dx))
+    plt.show()
+    return
+
+norm_plot()
+"""
+"""
+
+
+def energy_vals():
+    plt.figure()
+    E_array = []
+    E_an_array=[]
+    for i in range(0,len(CNS),10):
+        if i>=0:
+            E_array = np.append(E_array,(intg.simps(np.conj(CNS[i,:])*((function(CNS[i,:],i*dt))*1j), x=None,dx=dx)))
+    for i in range(0,len(CNS),10):
+        if i>=0:
+            E_an_array = np.append(E_an_array,(intg.simps(np.conj(analytical(i*dt))*((function(analytical(i*dt),i*dt))*1j), x=None,dx=dx)))
+    
+    x = ts[::10]
+    y = E_array
+    z= E_an_array
+    plt.grid(True)
+    plt.xlabel('t /s')
+    plt.ylabel('E')
+    #plt.ylim(0,2e+2)
+    #plt.title('dt=%.4f dx=%.4f' %(dt,dx))
+    plt.plot(x,y,c='r',label='CN')
+    plt.plot(x,z,c='k',label='analytical')
+    plt.legend(loc='best')
+    plt.show()
+    plt.savefig('Energy_CN _dt=%f_dx=%f.png'%(dt,dx))
+    #print(E_array)
+    return
+    
+energy_vals()
+
+def fidelity():
+    plt.figure()
+    fidel_array = np.zeros((0,))
+    for i in range(int(tmax/dt)):
+        if i>= 0:
+            fidel_array = np.append(fidel_array,np.absolute(intg.simps(np.conj(CNS[i,:])*analytical(i*dt), x=None,dx=dx))**2)
+    
+    x = ts
+    y = fidel_array
+    plt.grid(True)
+    plt.xlabel(' $ t $ [a.u] ')
+    plt.ylabel('Fidelity')
+    plt.ylim(0,1.1) 
+    plt.title('Fidelity vs time Crank Nicholson ,dt=%.4f dx=%.4f, K0=%.4f' %(dt,dx,k0))
+    plt.plot(x,y,c='k')
+    plt.savefig('REPfidelity_CN _dt=%f_dx=%f.png'%(dt,dx))
+    plt.show()
+    return
+fidelity()
+
+
+
+def Transmission():
+    T_array = np.zeros((0,))
+    for i in range(0,len(CNS)):
+        if i>= 0:
+            T_array = np.append(T_array,intg.simps(np.absolute((CNS[i,0:b1]))**2, x=None,dx=dx))
+    
+    x = ts
+    y = T_array
+    plt.figure()
+    plt.grid(True)
+    plt.xlabel('t /s')
+    plt.ylabel('Transmission coefficent')
+    plt.xlim(0,tmax)
+    plt.title('TRansmission coef vs time,dt=%.4f dx=%.4f' %(dt,dx))
+    plt.plot(x,y,c='r')
+    plt.savefig('TC_CN _dt=%f_dx=%f.png'%(dt,dx))
+    plt.show()
+    return T_array[-1]
+
+
+TC= Transmission()
+
+def Reflection():
+    R_array = np.zeros((0,))
+    for i in range(0,len(CNS)):
+        if i>= 0:
+            R_array = np.append(R_array,intg.simps(np.absolute((CNS[i,b2:-1]))**2, x=None,dx=dx))
+
+    x = ts
+    y = R_array
+    plt.figure()
+    plt.grid(True)
+    plt.xlabel('t /s')
+    plt.ylabel('Reflection coef')
+    plt.xlim(0,tmax)
+    plt.title('Reflection coef vs time,dt=%.4f dx=%.4f' %(dt,dx))
+    plt.plot(x,y,c='r')
+    plt.savefig('RC_CN _dt=%f_dx=%f.png'%(dt,dx))
+    plt.show()
+    return R_array[-1]
+
+RC=Reflection()
+
+print('RC:',RC,'TC:',TC,'R+T:',RC+TC)
+"""
+
+def whole(height_min,height_max,width,step): 
+    '''height_min- minimum height of the potential barrier
+    height_max- maximum height of the potential barrier
+    width- width of potential barrier
+    step- difference between the potentials plotted'''
+    barrier_s=28
+    barrier_e=barrier_start+width 
+    bound1=int(startx + (barrier_s + 1 - startx)/dx)   #lower bound
+    bound2=int(startx + (barrier_e + 1 - startx)/dx) 
+    T=[0]*int(np.absolute((height_max-height_min)/step))#values in x space#
+    R=[0]*int(np.absolute((height_max-height_min)/step))
+    h=height_min
+    H=[0]*int(np.absolute((height_max-height_min)/step))
+    #S=[0]*2*int(np.absolute((height_max-height_min)/step))
+    index=0
+    for i in range(0,int(np.absolute(height_max-height_min)),step):
+        
+        h = height_min+i
+        
+        H[index]=h
+        CN=crank_nicholson(bound1,bound2,h)[0][-1,:]
+        trans= intg.simps((np.absolute(CN[0:b1]))**2, x=None,dx=dx)
+        ref= intg.simps((np.absolute(CN[b2:len(CN)]))**2, x=None,dx=dx)
+        T[index]=trans
+        R[index]=ref
+        index +=1
+    plt.figure()
+    print(R)
+    print(T)
+    plt.grid(True)
+    plt.plot(H,T,'r',label='trans') 
+    plt.plot(H,R,'b',label='ref')
+    plt.xlabel('Potential barrier height/ -i' )
+    plt.ylabel('lProbability')
+    plt.legend(loc='best')
+    plt.xlim(0,height_max)
+    plt.show()
+    
+    return
+whole(50j,650j,10,50)
+
+
+
+
+
+
+
+
+
+
+
+
